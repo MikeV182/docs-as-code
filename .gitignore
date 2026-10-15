@@ -1,0 +1,16 @@
+# Виртуальное окружение
+.venv/
+venv/
+
+# Сборка MkDocs
+site/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# IDE и ОС
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
