@@ -1,5 +1,12 @@
 site_name: Docs as Code
 
+nav:
+  - Главная: index.md
+  - Проект:
+      - Описание: project/overview.md
+      - Требования: project/requirements.md
+      - Диаграммы: project/diagrams.md
+
 theme:
   name: readthedocs
 
