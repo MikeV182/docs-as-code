@@ -6,6 +6,7 @@ nav:
       - Описание: project/overview.md
       - Требования: project/requirements.md
       - Диаграммы: project/diagrams.md
+  - API: api/index.md
 
 theme:
   name: readthedocs
@@ -13,3 +14,4 @@ theme:
 plugins:
   - search
   - mermaid2
+  - swagger-ui-tag

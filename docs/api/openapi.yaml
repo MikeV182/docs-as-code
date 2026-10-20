@@ -1,0 +1,325 @@
+openapi: 3.0.3
+info:
+  title: API классификатора обращений
+  version: 1.0.0
+  description: |
+    API сервиса, который автоматически определяет категорию обращения
+    в техническую поддержку и направляет его в очередь нужной группы.
+
+    Если модель не может определить категорию или не уверена в результате,
+    обращение попадает в общую очередь со статусом `needs_manual_classification`.
+    Оператор назначает категорию вручную.
+servers:
+  - url: https://example.com/api/v1
+    description: Условный сервер (реальный не требуется)
+tags:
+  - name: Обращения
+    description: Отправка обращений и просмотр результата классификации
+  - name: Категории
+    description: Справочник категорий обращений
+
+paths:
+  /requests:
+    post:
+      tags: [Обращения]
+      summary: Отправить обращение на классификацию
+      description: |
+        Сохраняет обращение, присваивает ему номер и передаёт текст ML-модели.
+        Соответствует US-01, US-02 и сценарию UC-01.
+      operationId: createRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRequest'
+            example:
+              text: Деньги списались, но подписка не активна
+      responses:
+        '201':
+          description: Обращение создано и классифицировано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportRequest'
+              examples:
+                classified:
+                  summary: Модель уверена в результате
+                  value:
+                    id: 1024
+                    text: Деньги списались, но подписка не активна
+                    status: classified
+                    category: payment
+                    manuallyAssigned: false
+                    classification:
+                      category: payment
+                      confidence: 0.94
+                      modelVersion: 1.2.0
+                    createdAt: '2026-10-20T10:15:00Z'
+                manual:
+                  summary: Модель не уверена — обращение в общей очереди
+                  value:
+                    id: 1025
+                    text: Ничего не работает
+                    status: needs_manual_classification
+                    category: null
+                    manuallyAssigned: false
+                    classification:
+                      category: error
+                      confidence: 0.41
+                      modelVersion: 1.2.0
+                    createdAt: '2026-10-20T10:16:00Z'
+        '400':
+          description: Некорректный текст обращения
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                emptyText:
+                  summary: Передан пустой текст
+                  value:
+                    code: EMPTY_TEXT
+                    message: Опишите проблему
+                textTooLong:
+                  summary: Текст длиннее 5000 символов
+                  value:
+                    code: TEXT_TOO_LONG
+                    message: Текст обращения не должен превышать 5000 символов
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /requests/{id}:
+    get:
+      tags: [Обращения]
+      summary: Получить обращение и результат классификации
+      operationId: getRequest
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Обращение найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /requests/{id}/category:
+    put:
+      tags: [Обращения]
+      summary: Исправить или назначить категорию вручную
+      description: |
+        Оператор выбирает категорию, обращение перемещается в очередь
+        соответствующей группы, флаг `manuallyAssigned` становится `true`.
+        Соответствует US-03.
+      operationId: setRequestCategory
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetCategory'
+            example:
+              category: access
+      responses:
+        '200':
+          description: Категория назначена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportRequest'
+              example:
+                id: 1025
+                text: Ничего не работает
+                status: classified
+                category: access
+                manuallyAssigned: true
+                classification:
+                  category: error
+                  confidence: 0.41
+                  modelVersion: 1.2.0
+                createdAt: '2026-10-20T10:16:00Z'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /categories:
+    get:
+      tags: [Категории]
+      summary: Получить список категорий
+      operationId: listCategories
+      responses:
+        '200':
+          description: Список категорий
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+              example:
+                - code: payment
+                  name: Оплата
+                - code: access
+                  name: Доступ
+                - code: error
+                  name: Ошибка
+                - code: question
+                  name: Вопрос
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  parameters:
+    RequestId:
+      name: id
+      in: path
+      required: true
+      description: Номер обращения
+      schema:
+        type: integer
+        minimum: 1
+      example: 1024
+
+  schemas:
+    CategoryCode:
+      type: string
+      enum: [payment, access, error, question]
+      description: |
+        Код категории: `payment` — Оплата, `access` — Доступ,
+        `error` — Ошибка, `question` — Вопрос.
+
+    Category:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          $ref: '#/components/schemas/CategoryCode'
+        name:
+          type: string
+          example: Оплата
+
+    CreateRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: Текст обращения
+          example: Не могу войти в личный кабинет
+
+    SetCategory:
+      type: object
+      required: [category]
+      properties:
+        category:
+          $ref: '#/components/schemas/CategoryCode'
+
+    ClassificationResult:
+      type: object
+      nullable: true
+      description: Ответ ML-модели. `null`, если модель была недоступна.
+      required: [category, confidence, modelVersion]
+      properties:
+        category:
+          allOf:
+            - $ref: '#/components/schemas/CategoryCode'
+          description: Категория, которую предложила модель
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: |
+            Уверенность модели от 0 до 1. Если значение ниже порога,
+            обращение попадает в общую очередь.
+          example: 0.94
+        modelVersion:
+          type: string
+          description: Версия ML-модели, которая выполнила классификацию
+          example: 1.2.0
+
+    SupportRequest:
+      type: object
+      required: [id, text, status, category, manuallyAssigned, classification, createdAt]
+      properties:
+        id:
+          type: integer
+          description: Номер обращения
+          example: 1024
+        text:
+          type: string
+          description: Текст обращения
+          example: Деньги списались, но подписка не активна
+        status:
+          type: string
+          enum: [classified, needs_manual_classification]
+          description: |
+            `classified` — обращение в очереди группы;
+            `needs_manual_classification` — в общей очереди.
+        category:
+          allOf:
+            - $ref: '#/components/schemas/CategoryCode'
+          nullable: true
+          description: Итоговая категория. `null`, если обращение в общей очереди.
+        manuallyAssigned:
+          type: boolean
+          description: Категория назначена оператором
+        classification:
+          $ref: '#/components/schemas/ClassificationResult'
+        createdAt:
+          type: string
+          format: date-time
+          description: Дата и время создания обращения
+          example: '2026-10-20T10:15:00Z'
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: Опишите проблему
+
+  responses:
+    ValidationError:
+      description: Некорректный запрос (например, неизвестная категория)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: VALIDATION_ERROR
+            message: Неизвестная категория delivery
+    NotFound:
+      description: Обращение не найдено
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: NOT_FOUND
+            message: Обращение 9999 не найдено
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: INTERNAL_ERROR
+            message: Внутренняя ошибка сервера
