@@ -26,6 +26,12 @@ paths:
       description: |
         Сохраняет обращение, присваивает ему номер и передаёт текст ML-модели.
         Соответствует US-01, US-02 и сценарию UC-01.
+
+        Недоступность модели (в том числе таймаут) не считается ошибкой
+        сервиса: обращение всё равно сохраняется и возвращается ответ `201`
+        со статусом `needs_manual_classification`, `category: null` и
+        `classification: null`. Поэтому ответа `503` у метода нет —
+        обращение пользователя не теряется и не требует повторной отправки.
       operationId: createRequest
       requestBody:
         required: true
@@ -69,6 +75,16 @@ paths:
                       confidence: 0.41
                       modelVersion: 1.2.0
                     createdAt: '2026-10-20T10:16:00Z'
+                modelUnavailable:
+                  summary: Модель недоступна — обращение в общей очереди
+                  value:
+                    id: 1026
+                    text: Не приходит письмо с паролем
+                    status: needs_manual_classification
+                    category: null
+                    manuallyAssigned: false
+                    classification: null
+                    createdAt: '2026-10-20T10:17:00Z'
         '400':
           description: Некорректный текст обращения
           content:
@@ -116,6 +132,11 @@ paths:
         Оператор выбирает категорию, обращение перемещается в очередь
         соответствующей группы, флаг `manuallyAssigned` становится `true`.
         Соответствует US-03.
+
+        Перезапись разрешена: категорию можно назначить и обращению в общей
+        очереди, и уже классифицированному обращению (исправление ошибки
+        модели или предыдущего оператора). Поэтому ответа 409 у метода нет,
+        повторный вызов с той же категорией идемпотентен.
       operationId: setRequestCategory
       parameters:
         - $ref: '#/components/parameters/RequestId'
@@ -188,7 +209,7 @@ components:
       schema:
         type: integer
         minimum: 1
-      example: 1024
+        example: 1024
 
   schemas:
     CategoryCode:
@@ -228,14 +249,13 @@ components:
 
     ClassificationResult:
       type: object
-      nullable: true
-      description: Ответ ML-модели. `null`, если модель была недоступна.
+      description: |
+        Ответ ML-модели. В `SupportRequest.classification` вместо него
+        возвращается `null`, если модель была недоступна.
       required: [category, confidence, modelVersion]
       properties:
         category:
-          allOf:
-            - $ref: '#/components/schemas/CategoryCode'
-          description: Категория, которую предложила модель
+          $ref: '#/components/schemas/CategoryCode'
         confidence:
           type: number
           format: float
@@ -252,6 +272,11 @@ components:
 
     SupportRequest:
       type: object
+      description: |
+        Поля `category` и `classification` обязательны в ответе, но могут
+        быть равны `null`. Это сделано намеренно: клиент всегда получает
+        одинаковую структуру, а `null` явно означает «значения пока нет»
+        (обращение в общей очереди или модель была недоступна).
       required: [id, text, status, category, manuallyAssigned, classification, createdAt]
       properties:
         id:
@@ -277,7 +302,10 @@ components:
           type: boolean
           description: Категория назначена оператором
         classification:
-          $ref: '#/components/schemas/ClassificationResult'
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ClassificationResult'
+          description: Результат работы модели. `null`, если модель была недоступна.
         createdAt:
           type: string
           format: date-time
